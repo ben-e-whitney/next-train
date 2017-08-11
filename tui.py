@@ -29,6 +29,18 @@ class Chooser:
             else line[: curses.COLS - len(cls.TAG)] + cls.TAG
         )
 
+    @classmethod
+    def choice_index(cls, i, j):
+        if j < cls.NUM_QUESTION_LINES:
+            raise ValueError(
+                'Coordinate {j} does not correspond to a choice.'.format(j=j)
+            )
+        else:
+            return (
+                i * (curses.LINES - cls.NUM_QUESTION_LINES) +
+                j - cls.NUM_QUESTION_LINES
+            )
+
     def __call__(self, window):
         assert len(self.TAG) <= curses.COLS
         assert self.NUM_QUESTION_LINES <= curses.LINES
@@ -89,28 +101,16 @@ class Chooser:
         else:
             self.draw_choice(window, i, j)
 
+    def attribute(self, j):
+        return curses.A_STANDOUT if self.emphasized[j] else curses.A_NORMAL
+
     def draw_question(self, window):
-        window.addstr(0, 0, self.question,
-                      curses.A_STANDOUT if self.emphasized[0]
-                      else curses.A_NORMAL)
+        window.addstr(0, 0, self.question, self.attribute(0))
 
     def draw_choice(self, window, i, j):
         k = self.choice_index(i, j)
         if k < len(self.choices):
-            window.addstr(j, 0, self.choices[k],
-                          curses.A_STANDOUT if self.emphasized[j]
-                          else curses.A_NORMAL)
-
-    def choice_index(self, i, j):
-        if j < self.NUM_QUESTION_LINES:
-            raise ValueError(
-                'Coordinate {j} does not correspond to a choice.'.format(j=j)
-            )
-        else:
-            return (
-                i * (curses.LINES - self.NUM_QUESTION_LINES) +
-                j - self.NUM_QUESTION_LINES
-            )
+            window.addstr(j, 0, self.choices[k], self.attribute(j))
 
     def toggle(self, window, i, j):
         self.emphasized[j] = not self.emphasized[j]
