@@ -57,14 +57,19 @@ class Chooser:
         min_y = 0
         max_y = curses.LINES - 1 if page < max_page else max_page_max_y
         self.draw_page(window, page)
+        digits = []
+        move_made = False
         while True:
             key = window.getch(0, curses.COLS - 1)
             if key == curses.KEY_DOWN:
+                digits.clear()
                 if y < max_y:
                     self.toggle(window, page, y)
                     y += 1
                     self.toggle(window, page, y)
-                    min_y = self.NUM_QUESTION_LINES
+                    if not move_made:
+                        min_y = self.NUM_QUESTION_LINES
+                        move_made = True
                 elif page < max_page:
                     self.emphasized[y] = False
                     page += 1
@@ -74,6 +79,7 @@ class Chooser:
                     if page == max_page:
                         max_y = max_page_max_y
             elif key == curses.KEY_UP:
+                digits.clear()
                 if y > min_y:
                     self.toggle(window, page, y)
                     y -= 1
@@ -86,8 +92,23 @@ class Chooser:
                     self.emphasized[y] = True
                     self.draw_page(window, page)
             elif key == curses.KEY_ENTER:
-                return self.choice_index(page, y)
-        return None
+                if digits:
+                    index = 0
+                    for digit in digits:
+                        index *= 10
+                        index += digit
+                    if index < len(self.choices):
+                        return index
+                    else:
+                        digits.clear()
+                if move_made:
+                    return self.choice_index(page, y)
+            else:
+                char = chr(key)
+                if char.isdigit():
+                    digits.append(int(char))
+                else:
+                    digits.clear()
 
     def draw_page(self, window, i):
         window.clear()
