@@ -22,8 +22,8 @@ ROUTE_TYPES = tuple({'route_type_id': t[0], 'description': t[1]} for t in (
     ('7', ('Funicular. Any rail system designed for steep inclines.')),
 ))
 
-CSV_Row = typing.Mapping[str, str]
-CSV_Restrictions = typing.Mapping[str, typing.AbstractSet[str]]
+CSV_Row = typing.Dict[str, str]
+CSV_Restrictions = typing.Dict[str, typing.Collection[str]]
 
 class FilteredCSV:
     FILE_SIZE_THRESHOLD = 2 ** 20
@@ -36,11 +36,12 @@ class FilteredCSV:
             filename: str,
             restrictions: CSV_Restrictions,
     ) -> None:
-        self.filename = filename
-        self.restrictions = restrictions
-        self.info = archive.getinfo(self.filename)
-        display_loading_message = (self.info.file_size >
-                                   self.FILE_SIZE_THRESHOLD)
+        self.filename: str = filename
+        self.restrictions: CSV_Restrictions = restrictions
+        self.info: zipfile.ZipInfo = archive.getinfo(self.filename)
+        display_loading_message: bool = (
+            self.info.file_size > self.FILE_SIZE_THRESHOLD
+        )
         if display_loading_message:
             sys.stdout.write('Loading {nam} (about {siz}) ... '.format(
                 nam=self.filename, siz=self._format_file_size()))
@@ -48,8 +49,13 @@ class FilteredCSV:
         with archive.open(self.filename) as f:
             #See <http://stackoverflow.com/q/5627954/2899277> for explanation
             #of `io.TextIOWrapper` use.
-            self.rows = csv.DictReader(io.TextIOWrapper(f), dialect='excel')
-            self.apply_restrictions()
+            #Defining temporary variable `rows` here so we can be more precise
+            #about the type of `self.rows`. In particular, later on we will
+            #want to call `len` on it, so it needs to belong to `typing.Sized`.
+            rows: typing.Iterable[CSV_Row] = (
+                csv.DictReader(io.TextIOWrapper(f), dialect='excel')
+            )
+            self.apply_restrictions(rows=rows)
         if display_loading_message:
             sys.stdout.write('done.\n')
 
@@ -57,31 +63,37 @@ class FilteredCSV:
         return all(row[key] in values
                    for key, values in self.restrictions.items())
 
-    def apply_restrictions(self) -> None:
-        self.rows = tuple(filter(self.match, self.rows))
+    def apply_restrictions(
+            self, rows: typing.Optional[typing.Iterable[CSV_Row]]=None
+    ) -> None:
+        if rows is None:
+            rows = self.rows
+        self.rows: typing.Collection[CSV_Row] = tuple(filter(self.match, rows))
 
     def values(self, fieldname: str) -> typing.Set[str]:
         return set(map(operator.itemgetter(fieldname), self.rows))
 
     def _format_file_size(self, figures: int=2) -> str:
-        n = self.info.file_size
+        n: int = self.info.file_size
         for prefix in self.FILE_SIZE_PREFIXES:
             if n < self.FILE_SIZE_FACTOR:
                 break
             else:
-                n /= self.FILE_SIZE_FACTOR
-        ndigits = -(len(str(int(n))) - figures)
+                n //= self.FILE_SIZE_FACTOR
+        ndigits: int = -(len(str(int(n))) - figures)
         return '{num} {pre}B'.format(num=int(round(n, ndigits)), pre=prefix)
 
     def write(self, archive: zipfile.ZipFile) -> None:
-        fieldnames = set()
+        fieldnames: set = set()
         for row in self.rows:
             fieldnames.update(row.keys())
         #See <http://stackoverflow.com/q/25971205/2899277> for explanation
         #of `io.StringIO` use.
         #archive is already in the context manager thing or w/e
-        csv_buffer = io.StringIO()
-        writer = csv.DictWriter(csv_buffer, tuple(fieldnames), dialect='excel')
+        csv_buffer: io.StringIO = io.StringIO()
+        writer: csv.DictWriter = csv.DictWriter(
+            csv_buffer, tuple(fieldnames), dialect='excel'
+        )
         writer.writeheader()
         for row in self.rows:
             writer.writerow(row)
@@ -90,15 +102,17 @@ class FilteredCSV:
 def bin_rows_by_field(
         rows: typing.Iterable[CSV_Row],
         field: str
-) -> typing.Dict[str, CSV_Row]:
-    binned = collections.defaultdict(list)
+) -> typing.Dict[str, typing.List[CSV_Row]]:
+    binned: typing.Dict[str, typing.List[CSV_Row]] = (
+        collections.defaultdict(list)
+    )
     for row in rows:
         binned[row[field]].append(row)
     return dict(binned)
 
 def get_choice(
         name: str,
-        rows: typing.Iterable[CSV_Row],
+        rows: typing.Collection[CSV_Row],
         id_field: str,
         display_fields: typing.Sequence[str],
         any_choice: bool=False
@@ -112,39 +126,39 @@ def get_choice(
             'Row {row} has no value for any of display fields {dfs}.'
         ).format(row=row, dfs=display_fields))
 
-    lower = 0
-    upper = len(rows) - 1
-    index_width = len(str(upper))
+    lower: int = 0
+    upper: int = len(rows) - 1
+    index_width: int = len(str(upper))
 
-    any_choice_text = ' (ENTER for any)' if any_choice else ''
-    input_message = 'Your choice [{low}–{upp}]{ext}: '.format(
+    any_choice_text: str = ' (ENTER for any)' if any_choice else ''
+    input_message: str = 'Your choice [{low}–{upp}]{ext}: '.format(
         low=lower, upp=upper, ext=any_choice_text)
-    bad_input_message = (
+    bad_input_message: str = (
         'Please input an integer between {low} and {upp}{ext}.'
     ).format(low=lower, upp=upper, ext=any_choice_text)
 
     print('Please choose a{vow} {nam}.'.format(nam=name,
         vow='n' if name[0] in 'aeiou' else ''))
-    row_displays = sorted(
+    row_displays: typing.List[typing.Tuple[CSV_Row, str]]  = sorted(
         ((row, display(row)) for row in rows),
         key=lambda pair: pair[1],
     )
     print('\n'.join('\t{i:{wid}}: {dis}'.format(i=i, wid=index_width,
         dis=pair[1]) for i, pair in enumerate(row_displays)))
     while True:
-        choice = input(input_message)
+        choice: str = input(input_message)
         if any_choice and not choice:
             return None
         else:
             try:
-                choice = int(choice)
+                index: int = int(choice)
             except ValueError:
                 print(bad_input_message)
                 continue
-            if not (lower <= choice <= upper):
+            if not (lower <= index <= upper):
                 print(bad_input_message)
             else:
-                return row_displays[choice][0][id_field]
+                return row_displays[index][0][id_field]
 
 def get_stop_sequences(rows: typing.Iterable[CSV_Row]) -> typing.Iterable[int]:
     return map(int, map(operator.itemgetter('stop_sequence'), rows))
@@ -168,11 +182,13 @@ def trim_gtfs(
     with zipfile.ZipFile(filename_original, 'r') as original, \
             zipfile.ZipFile(filename_trimmed, 'w') as trimmed:
         agency = FilteredCSV(original, 'agency.txt', {})
-        route_restrictions = {}
-        agency_id = get_choice('agency', agency.rows, 'agency_id',
-                      ('agency_name',), any_choice=True)
+        route_restrictions: CSV_Restrictions = {}
+        agency_id: typing.Optional[str] = get_choice(
+            'agency', agency.rows, 'agency_id', ('agency_name',),
+            any_choice=True
+        )
         if agency_id is not None:
-            route_restrictions['agency_id'] = agency_id
+            route_restrictions['agency_id'] = (agency_id,)
             agency.restrictions.update(agency_id=(agency_id,))
             agency.apply_restrictions()
         route_type = get_choice(
@@ -183,7 +199,7 @@ def trim_gtfs(
             any_choice=True
         )
         if route_type is not None:
-            route_restrictions['route_type'] = route_type
+            route_restrictions['route_type'] = (route_type,)
         routes = FilteredCSV(original, 'routes.txt', route_restrictions)
 
         route_id = get_choice(
@@ -197,6 +213,7 @@ def trim_gtfs(
             routes.restrictions.update(route_id=(route_id,))
             routes.apply_restrictions()
 
+        #We'll get an error here if `route_id is None`.
         trips = FilteredCSV(original, 'trips.txt', {'route_id': route_id})
         trip_ids = trips.values('trip_id')
         stop_times = FilteredCSV(original, 'stop_times.txt',
@@ -214,7 +231,7 @@ def trim_gtfs(
         stop_times.restrictions.update(trip_id=trip_ids_through_departure)
         stop_times.apply_restrictions()
 
-        stop_ids_arrival = set()
+        stop_ids_arrival: set = set()
         for stop_times_for_trip in bin_rows_by_field(stop_times.rows,
                                                      'trip_id').values():
             stop_times_by_stop_id = bin_rows_by_field(stop_times_for_trip,
