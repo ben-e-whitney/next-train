@@ -23,6 +23,40 @@ class Chooser:
     NUM_QUESTION_LINES: int = 1
     TAG: str = ' ...'
 
+    class _EmphasisTranslator:
+        """
+        Translator from emphasis flags to `curses` attributes.
+
+        Parameters
+        ----------
+        emphasized
+            Emphasis flags to be translated.
+        """
+
+        def __init__(self, emphasized: typing.List[bool]) -> None:
+            """
+            Initialize this _EmphasisTranslator.
+            """
+
+            self.emphasized: typing.List[bool] = emphasized
+
+        def __getitem__(self, j: int) -> int:
+            """
+            Translate an emphasis flag to a `curses` attribute.
+
+            Parameters
+            ----------
+            j
+                Line index (`y` coordinate of the line).
+
+            Returns
+            -------
+            int
+                Current attribute for the line.
+            """
+
+            return curses.A_STANDOUT if self.emphasized[j] else curses.A_NORMAL
+
     def __init__(self, question: str, choices: typing.Collection[str]) -> None:
         """
         Initialize this Chooser.
@@ -40,6 +74,9 @@ class Chooser:
             itertools.repeat(False, curses.LINES)
         )
         self.emphasized[0] = True
+        self.attributes: Chooser._EmphasisTranslator = (
+            self._EmphasisTranslator(self.emphasized)
+        )
 
     @classmethod
     def truncate(cls, line: str) -> str:
@@ -209,23 +246,6 @@ class Chooser:
         else:
             self.draw_choice(window, i, j)
 
-    def attribute(self, j: int) -> int:
-        """
-        Find the `curses` attribute of a line.
-
-        Parameters
-        ----------
-        j
-            Line index (`y` coordinate of the line).
-
-        Returns
-        -------
-        int
-            Current attribute for the line.
-        """
-
-        return curses.A_STANDOUT if self.emphasized[j] else curses.A_NORMAL
-
     def draw_question(self, window) -> None:
         """
         Draw the question on a window.
@@ -236,7 +256,7 @@ class Chooser:
             Window on which to draw the question.
         """
 
-        window.addstr(0, 0, self.question, self.attribute(0))
+        window.addstr(0, 0, self.question, self.attributes[0])
 
     def draw_choice(self, window, i: int, j: int) -> None:
         """
@@ -254,7 +274,7 @@ class Chooser:
 
         k: int = self.choice_index(i, j)
         if k < len(self.choices):
-            window.addstr(j, 0, self.choices[k], self.attribute(j))
+            window.addstr(j, 0, self.choices[k], self.attributes[j])
 
     def toggle(self, window, i: int, j: int) -> None:
         """
