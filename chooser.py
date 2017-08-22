@@ -1,14 +1,33 @@
+"""
+curses tool to allow a user to select from a list of options.
+"""
+
 import curses
 curses.KEY_ENTER = 10
 import itertools
 import typing
 
 class Chooser:
+    """
+    Chooser between a list of options.
+
+    Parameters
+    ----------
+    question
+        Question whose answer should be one of `choices`.
+    choices
+        Possible answers to `question`.
+    """
+
     CHOICE_INDENTATION: int = 2
     NUM_QUESTION_LINES: int = 1
     TAG: str = ' ...'
 
     def __init__(self, question: str, choices: typing.Collection[str]) -> None:
+        """
+        Initialize this Chooser.
+        """
+
         self.question: str = self.truncate(question)
         pattern: str = ' ' * self.CHOICE_INDENTATION + (
             '[{{:>{wid}}}] {{}}'.format(wid=len(str(len(choices) - 1)))
@@ -24,6 +43,20 @@ class Chooser:
 
     @classmethod
     def truncate(cls, line: str) -> str:
+        """
+        Truncate a line so it fits on the screen.
+
+        Parameters
+        ----------
+        line
+            Untruncated line of text to be displayed.
+
+        Returns
+        -------
+        str
+            Truncated line.
+        """
+
         return (
             line if len(line) <= curses.COLS
             else line[: curses.COLS - len(cls.TAG)] + cls.TAG
@@ -31,6 +64,22 @@ class Chooser:
 
     @classmethod
     def choice_index(cls, i: int, j: int) -> int:
+        """
+        Compute the index of a choice displayed on the screen.
+
+        Parameters
+        ----------
+        i
+            Page index.
+        j
+            Line index (`y` coordinate of the line).
+
+        Returns
+        -------
+        int
+            Index of choice displayed on line `j` of page `i`.
+        """
+
         if j < cls.NUM_QUESTION_LINES:
             raise ValueError(
                 'Coordinate {j} does not correspond to a choice.'.format(j=j)
@@ -42,6 +91,20 @@ class Chooser:
             )
 
     def __call__(self, window) -> int:
+        """
+        Display question and choices to user and obtain response.
+
+        Parameters
+        ----------
+        window : curses.Window
+            Window on which to display choices to user.
+
+        Returns
+        -------
+        int
+            Index of choice made by user.
+        """
+
         assert len(self.TAG) <= curses.COLS
         assert self.NUM_QUESTION_LINES <= curses.LINES
         page: int = 0
@@ -111,28 +174,101 @@ class Chooser:
                     digits.clear()
 
     def draw_page(self, window, i: int) -> None:
+        """
+        Draw a page on a window.
+
+        Parameters
+        ----------
+        window : curses.Window
+            Window on which to draw the page.
+        i
+            Page index.
+        """
+
         window.clear()
         self.draw_question(window)
         for j in range(1, curses.LINES):
             self.draw_choice(window, i, j)
 
     def draw_line(self, window, i: int, j: int) -> None:
+        """
+        Draw a line of a page on a window.
+
+        Parameters
+        ----------
+        window : curses.Window
+            Window on which to draw the page.
+        i
+            Page index.
+        j
+            Line index (`y` coordinate of the line).
+        """
+
         if j < self.NUM_QUESTION_LINES:
             self.draw_question(window)
         else:
             self.draw_choice(window, i, j)
 
     def attribute(self, j: int) -> int:
+        """
+        Find the `curses` attribute of a line.
+
+        Parameters
+        ----------
+        j
+            Line index (`y` coordinate of the line).
+
+        Returns
+        -------
+        int
+            Current attribute for the line.
+        """
+
         return curses.A_STANDOUT if self.emphasized[j] else curses.A_NORMAL
 
     def draw_question(self, window) -> None:
+        """
+        Draw the question on a window.
+
+        Parameters
+        ----------
+        window : curses.Window
+            Window on which to draw the question.
+        """
+
         window.addstr(0, 0, self.question, self.attribute(0))
 
     def draw_choice(self, window, i: int, j: int) -> None:
+        """
+        Draw a choice on a window.
+
+        Parameters
+        ----------
+        window : curses.Window
+            Window on which to draw the choice.
+        i
+            Page index.
+        j
+            Line index (`y` coordinate of the line).
+        """
+
         k: int = self.choice_index(i, j)
         if k < len(self.choices):
             window.addstr(j, 0, self.choices[k], self.attribute(j))
 
     def toggle(self, window, i: int, j: int) -> None:
+        """
+        Toggle the emphasis state of a line.
+
+        Parameters
+        ----------
+        window : curses.Window
+            Window on which to toggle the line.
+        i
+            Page index.
+        j
+            Line index (`y` coordinate of the line).
+        """
+
         self.emphasized[j] = not self.emphasized[j]
         self.draw_line(window, i, j)
