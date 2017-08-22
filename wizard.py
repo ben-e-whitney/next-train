@@ -7,23 +7,16 @@ import sys
 import typing
 import zipfile
 
-ROUTE_TYPES = tuple({'route_type_id': t[0], 'description': t[1]} for t in (
-    ('0', ('Tram, Streetcar, Light rail. Any light rail or street level '
-           'system within a metropolitan area.')),
-    ('1', ('Subway, Metro. Any underground rail system within a metropolitan '
-        'area.')),
-    ('2', 'Rail. Used for intercity or long-distance travel.'),
-    ('3', 'Bus. Used for short- and long-distance bus routes.'),
-    ('4', 'Ferry. Used for short- and long-distance boat service.'),
-    ('5', ('Cable car. Used for street-level cable cars where the cable runs '
-        'beneath the car.')),
-    ('6', ('Gondola, Suspended cable car. Typically used for aerial cable '
-           'cars where the car is suspended from the cable.')),
-    ('7', ('Funicular. Any rail system designed for steep inclines.')),
-))
-
 CSV_Row = typing.Dict[str, str]
 CSV_Restrictions = typing.Dict[str, typing.Collection[str]]
+
+with open('route_types.csv', 'r') as f:
+    reader = csv.DictReader(
+        f, fieldnames=('route_type_id', 'description'), dialect='unix'
+    )
+    #Skip header. Could also leave `fieldnames` unspecified above.
+    next(reader)
+    ROUTE_TYPES = tuple(reader)
 
 class FilteredCSV:
     FILE_SIZE_THRESHOLD = 2 ** 20
