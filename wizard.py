@@ -19,9 +19,11 @@ with open('route_types.csv', 'r') as f:
     ROUTE_TYPES = tuple(reader)
 
 class FilteredCSV:
-    FILE_SIZE_THRESHOLD = 2 ** 20
-    FILE_SIZE_PREFIXES = ('', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi', 'Yi')
-    FILE_SIZE_FACTOR = 2 ** 10
+    FILE_SIZE_THRESHOLD: int = 1 << 20
+    FILE_SIZE_PREFIXES: typing.Tuple[str, ...] = (
+        '', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi', 'Yi'
+    )
+    FILE_SIZE_FACTOR: int = 1 << 10
 
     def __init__(
             self,
@@ -202,12 +204,16 @@ def trim_gtfs(
             ('route_long_name', 'route_short_name',),
             any_choice=True,
         )
+        trip_restrictions: CSV_Restrictions = {}
         if route_id is not None:
             routes.restrictions.update(route_id=(route_id,))
             routes.apply_restrictions()
+            trip_restrictions.update(route_id=(route_id,))
 
-        #We'll get an error here if `route_id is None`.
-        trips = FilteredCSV(original, 'trips.txt', {'route_id': route_id})
+        #TODO: If `route_id is None`, I think we still need to restrict
+        #ourselves to trips of routes that the agency runs (and similarly with
+        #the route type.)
+        trips = FilteredCSV(original, 'trips.txt', trip_restrictions)
         trip_ids = trips.values('trip_id')
         stop_times = FilteredCSV(original, 'stop_times.txt',
                                  {'trip_id': trip_ids})
