@@ -1,11 +1,14 @@
 import collections
 import csv
+import curses
 import functools
 import io
 import operator
 import sys
 import typing
 import zipfile
+
+import chooser
 
 CSV_Row = typing.Dict[str, str]
 CSV_Restrictions = typing.Dict[str, typing.Collection[str]]
@@ -109,7 +112,8 @@ def binned_by_field(
         binned[row[field]].append(row)
     return dict(binned)
 
-def get_choice(
+def _get_choice(
+        window,
         name: str,
         rows: typing.Collection[CSV_Row],
         id_field: str,
@@ -125,39 +129,28 @@ def get_choice(
             'Row {row} has no value for any of display fields {dfs}.'
         ).format(row=row, dfs=display_fields))
 
-    lower: int = 0
-    upper: int = len(rows) - 1
-    index_width: int = len(str(upper))
-
-    any_choice_text: str = ' (ENTER for any)' if any_choice else ''
-    input_message: str = 'Your choice [{low}–{upp}]{ext}: '.format(
-        low=lower, upp=upper, ext=any_choice_text)
-    bad_input_message: str = (
-        'Please input an integer between {low} and {upp}{ext}.'
-    ).format(low=lower, upp=upper, ext=any_choice_text)
-
-    print('Please choose a{vow} {nam}.'.format(nam=name,
-        vow='n' if name[0] in 'aeiou' else ''))
-    row_displays: typing.List[typing.Tuple[CSV_Row, str]]  = sorted(
-        ((row, display(row)) for row in rows),
-        key=lambda pair: pair[1],
+    curses.curs_set(False)
+    question: str = 'Please choose a{vow} {nam}.'.format(
+        nam=name, vow='n' if name[0] in 'aeiou' else ''
     )
-    print('\n'.join('\t{i:{wid}}: {dis}'.format(i=i, wid=index_width,
-        dis=pair[1]) for i, pair in enumerate(row_displays)))
-    while True:
-        choice: str = input(input_message)
-        if any_choice and not choice:
-            return None
-        else:
-            try:
-                index: int = int(choice)
-            except ValueError:
-                print(bad_input_message)
-                continue
-            if not (lower <= index <= upper):
-                print(bad_input_message)
-            else:
-                return row_displays[index][0][id_field]
+    #This is gross, but it'll be removed in the next commit.
+    choices: typing.List[str] = []
+    if any_choice:
+        choices.append('any')
+    #TODO: we'll get a ValueError here if `rows` is empty.
+    _choices, sorted_rows = zip(*sorted(
+        zip(map(display, rows), rows),
+        #We don't want lexicographic sorting, since we likely can't compare
+        #elements of `rows` with one another.
+        key=lambda pair: pair[0],
+    ))
+    choices.extend(_choices)
+    index: int = chooser.Chooser(question, choices)(window)
+    if any_choice:
+        return None if not index else sorted_rows[index - 1][id_field]
+    else:
+        return sorted_rows[index][id_field]
+get_choice = functools.partial(curses.wrapper, _get_choice)
 
 def stop_sequences(rows: typing.Iterable[CSV_Row]) -> typing.Iterable[int]:
     return map(int, map(operator.itemgetter('stop_sequence'), rows))
@@ -193,7 +186,10 @@ def trim_gtfs(
 
         agency: FilteredCSV = FilteredCSV(original, 'agency.txt', {})
         agency_id: typing.Optional[str] = get_choice(
-            'agency', agency.rows, 'agency_id', ('agency_name',),
+            'agency',
+            agency.rows,
+            'agency_id',
+            ('agency_name',),
             any_choice=True
         )
         if agency_id is not None:
