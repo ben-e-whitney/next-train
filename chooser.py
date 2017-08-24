@@ -146,8 +146,9 @@ class Chooser:
         assert self.NUM_QUESTION_LINES <= curses.LINES
         page: int = 0
         min_page: int = 0
+        assert len(self.choices) > 0
         max_page: int = (
-            len(self.choices) // (curses.LINES - self.NUM_QUESTION_LINES)
+            (len(self.choices) - 1) // (curses.LINES - self.NUM_QUESTION_LINES)
         )
         max_page_max_y: int = self.NUM_QUESTION_LINES + (
             (len(self.choices) - 1) %
