@@ -11,12 +11,12 @@ CSV_Row = typing.Dict[str, str]
 CSV_Restrictions = typing.Dict[str, typing.Collection[str]]
 
 with open('route_types.csv', 'r') as f:
-    reader = csv.DictReader(
+    reader: csv.DictReader = csv.DictReader(
         f, fieldnames=('route_type_id', 'description'), dialect='unix'
     )
     #Skip header. Could also leave `fieldnames` unspecified above.
     next(reader)
-    ROUTE_TYPES = tuple(reader)
+    ROUTE_TYPES: typing.Tuple[CSV_Row, ...] = tuple(reader)
 
 class FilteredCSV:
     FILE_SIZE_THRESHOLD: int = 1 << 20
@@ -32,7 +32,7 @@ class FilteredCSV:
             restrictions: CSV_Restrictions,
     ) -> None:
         self.filename: str = filename
-        self.restrictions: CSV_Restrictions = restrictions
+        self._restrictions: CSV_Restrictions = restrictions
         self.info: zipfile.ZipInfo = archive.getinfo(self.filename)
         display_loading_message: bool = (
             self.info.file_size > self.FILE_SIZE_THRESHOLD
@@ -50,20 +50,24 @@ class FilteredCSV:
             rows: typing.Iterable[CSV_Row] = (
                 csv.DictReader(io.TextIOWrapper(f), dialect='excel')
             )
-            self.apply_restrictions(rows=rows)
+            self._apply_restrictions(rows=rows)
         if display_loading_message:
             sys.stdout.write('done.\n')
 
     def match(self, row: CSV_Row) -> bool:
         return all(row[key] in values
-                   for key, values in self.restrictions.items())
+                   for key, values in self._restrictions.items())
 
-    def apply_restrictions(
+    def _apply_restrictions(
             self, rows: typing.Optional[typing.Iterable[CSV_Row]]=None
     ) -> None:
         if rows is None:
             rows = self.rows
         self.rows: typing.Collection[CSV_Row] = tuple(filter(self.match, rows))
+
+    def update_restrictions(self, *args, **kwargs) -> None:
+        self._restrictions.update(*args, **kwargs)
+        self._apply_restrictions()
 
     def values(self, fieldname: str) -> typing.Set[str]:
         return set(map(operator.itemgetter(fieldname), self.rows))
@@ -94,7 +98,7 @@ class FilteredCSV:
             writer.writerow(row)
         archive.writestr(self.filename, csv_buffer.getvalue())
 
-def bin_rows_by_field(
+def binned_by_field(
         rows: typing.Iterable[CSV_Row],
         field: str
 ) -> typing.Dict[str, typing.List[CSV_Row]]:
@@ -155,38 +159,48 @@ def get_choice(
             else:
                 return row_displays[index][0][id_field]
 
-def get_stop_sequences(rows: typing.Iterable[CSV_Row]) -> typing.Iterable[int]:
+def stop_sequences(rows: typing.Iterable[CSV_Row]) -> typing.Iterable[int]:
     return map(int, map(operator.itemgetter('stop_sequence'), rows))
 
-def get_relevant_trip_ids(
+def trips_through_stop(
         rows: typing.Iterable[CSV_Row],
         stop_id: str
 ) -> typing.Set[str]:
-    return set(map(
-        operator.itemgetter('trip_id'),
-        filter(
-            lambda row: row['stop_id'] == stop_id,
-            rows
-        )
-    ))
+    """
+    Get trip IDs of trips going through a given stop.
 
+    Parameters
+    ----------
+    rows
+        Rows of `stop_times.txt` to be filtered.
+    stop_id
+        ID of stop of interest.
+
+    Returns
+    -------
+    set
+        IDs of trips going through stop `stop_id`.
+    """
+
+    return {row['trip_id'] for row in rows if row['stop_id'] == stop_id}
 def trim_gtfs(
         filename_original: str,
         filename_trimmed: str
 ) -> typing.Dict[str, str]:
     with zipfile.ZipFile(filename_original, 'r') as original, \
             zipfile.ZipFile(filename_trimmed, 'w') as trimmed:
-        agency = FilteredCSV(original, 'agency.txt', {})
         route_restrictions: CSV_Restrictions = {}
+
+        agency: FilteredCSV = FilteredCSV(original, 'agency.txt', {})
         agency_id: typing.Optional[str] = get_choice(
             'agency', agency.rows, 'agency_id', ('agency_name',),
             any_choice=True
         )
         if agency_id is not None:
-            route_restrictions['agency_id'] = (agency_id,)
-            agency.restrictions.update(agency_id=(agency_id,))
-            agency.apply_restrictions()
-        route_type = get_choice(
+            agency.update_restrictions(agency_id={agency_id})
+            route_restrictions.update(agency_id={agency_id})
+
+        route_type: typing.Optional[str] = get_choice(
             'route type',
             ROUTE_TYPES,
             'route_type_id',
@@ -194,105 +208,104 @@ def trim_gtfs(
             any_choice=True
         )
         if route_type is not None:
-            route_restrictions['route_type'] = (route_type,)
-        routes = FilteredCSV(original, 'routes.txt', route_restrictions)
+            route_restrictions.update(route_type={route_type})
 
-        route_id = get_choice(
+        routes: FilteredCSV = FilteredCSV(
+            original, 'routes.txt', route_restrictions
+        )
+        route_id: typing.Optional[str] = get_choice(
             'route',
             routes.rows,
             'route_id',
             ('route_long_name', 'route_short_name',),
             any_choice=True,
         )
-        trip_restrictions: CSV_Restrictions = {}
         if route_id is not None:
-            routes.restrictions.update(route_id=(route_id,))
-            routes.apply_restrictions()
-            trip_restrictions.update(route_id=(route_id,))
+            routes.update_restrictions(route_id={route_id})
 
-        #TODO: If `route_id is None`, I think we still need to restrict
-        #ourselves to trips of routes that the agency runs (and similarly with
-        #the route type.)
-        trips = FilteredCSV(original, 'trips.txt', trip_restrictions)
-        trip_ids = trips.values('trip_id')
-        stop_times = FilteredCSV(original, 'stop_times.txt',
-                                 {'trip_id': trip_ids})
-        stop_ids = stop_times.values('stop_id')
-        stops = FilteredCSV(original, 'stops.txt', {'stop_id': stop_ids})
-        stop_id_departure = get_choice(
+        trips: FilteredCSV = FilteredCSV(
+            original, 'trips.txt', {'route_id': routes.values('route_id')},
+        )
+        stop_times: FilteredCSV = FilteredCSV(
+            original, 'stop_times.txt', {'trip_id': trips.values('trip_id')}
+        )
+        stops: FilteredCSV = FilteredCSV(
+            original, 'stops.txt', {'stop_id': stop_times.values('stop_id')}
+        )
+        departure_stop_id: typing.Optional[str] = get_choice(
             'departure stop',
             stops.rows,
             'stop_id',
             ('stop_name', 'stop_code', 'stop_desc')
         )
-        trip_ids_through_departure = get_relevant_trip_ids(stop_times.rows,
-                                                  stop_id_departure)
-        stop_times.restrictions.update(trip_id=trip_ids_through_departure)
-        stop_times.apply_restrictions()
+        trip_ids_through_departure: typing.Set[str] = trips_through_stop(
+            stop_times.rows, departure_stop_id
+        )
+        stop_times.update_restrictions(trip_id=trip_ids_through_departure)
 
-        stop_ids_arrival: set = set()
-        for stop_times_for_trip in bin_rows_by_field(stop_times.rows,
-                                                     'trip_id').values():
-            stop_times_by_stop_id = bin_rows_by_field(stop_times_for_trip,
-                                                      'stop_id')
+        arrival_stop_ids: set = set()
+        for trip_stop_times in binned_by_field(
+                stop_times.rows, 'trip_id'
+        ).values():
+            #`trip_stop_times` is a list of the stops ('StopTimes') that a
+            #particular trip going through stop `departure_stop_id` makes
+            binned_stop_times: typing.Dict[str, typing.List[CSV_Row]] = (
+                binned_by_field(trip_stop_times, 'stop_id')
+            )
             #I don't see why you'd ever have multiple visits to a single stop
             #during one trip, but I don't want to read the reference closely
             #enough to rule the possibility out. So, we'll find loop over all
             #the stop times for the departure stop and find the minimum of the
             #stop sequences values, which will correspond to the first visit.
-            stop_sequence_departure = min(get_stop_sequences(
-                stop_times_by_stop_id[stop_id_departure]))
-            stop_ids_arrival.update(filter(
-                lambda stop_id: (
-                    max(get_stop_sequences(stop_times_by_stop_id[stop_id])) >
-                    stop_sequence_departure
-                ),
-                stop_times_by_stop_id.keys()
+            departure_stop_sequence = min(stop_sequences(
+                binned_stop_times[departure_stop_id]
             ))
-        stop_id_arrival = get_choice(
+            #We can get to a stop from stop `departure_stop_id` if it stop has
+            #a StopTime with stop sequence greater than
+            #`departure_stop_sequence`.
+            arrival_stop_ids.update(
+                #For each station ('Stop'), we find last stop ('StopTime') made
+                #there and decide whether it comes after the first stop at the
+                #departure stop.
+                stop_id for stop_id, _stop_times in binned_stop_times.items()
+                if max(stop_sequences(_stop_times)) > departure_stop_sequence
+            )
+        arrival_stop_id: typing.Optional[str] = get_choice(
             'arrival stop',
-            tuple(filter(
-                lambda row: row['stop_id'] in stop_ids_arrival,
-                stops.rows
-            )),
+            tuple(
+                row for row in stops.rows if row['stop_id'] in arrival_stop_ids
+            ),
             'stop_id',
             ('stop_name', 'stop_code', 'stop_desc')
         )
-        trip_ids_through_arrival = get_relevant_trip_ids(stop_times.rows,
-                                                         stop_id_arrival)
-
-        stops.restrictions.update(stop_id=(stop_id_departure, stop_id_arrival))
-        stops.apply_restrictions()
-        stop_times.restrictions.update(
-            stop_id=(stop_id_departure, stop_id_arrival)
+        trip_ids_through_arrival: typing.Set[str] = trips_through_stop(
+            stop_times.rows, arrival_stop_id
         )
-        stop_times.apply_restrictions()
 
-        trips.restrictions.update(
-            trip_id=trip_ids_through_departure.intersection(
-                trip_ids_through_arrival)
-        )
-        trips.apply_restrictions()
-
-        routes.restrictions.update(route_id=trips.values('route_id'))
-        routes.apply_restrictions()
-
+        stops.update_restrictions(stop_id={departure_stop_id, arrival_stop_id})
+        #Applying the same restriction by a different name.
+        stop_times.update_restrictions(stop_id=stops.values('stop_id'))
+        trips.update_restrictions(trip_id=(
+            trip_ids_through_departure.intersection(trip_ids_through_arrival)
+        ))
+        routes.update_restrictions(route_id=trips.values('route_id'))
         #`agency_id` isn't a required field for `routes.txt`, so this isn't a
         #great thing to be doing.
-        agency.restrictions.update(agency_id=routes.values('agency_id'))
-        agency.apply_restrictions()
+        agency.update_restrictions(agency_id=routes.values('agency_id'))
 
-        service_ids = trips.values('service_id')
-        calendar = FilteredCSV(original, 'calendar.txt',
-                                {'service_id': service_ids})
+        service_ids: typing.Set[str] = trips.values('service_id')
+        calendar: FilteredCSV = FilteredCSV(
+            original, 'calendar.txt', {'service_id': service_ids}
+        )
+        filtereds: typing.List[FilteredCSV] = [
+            agency, stops, routes, trips, stop_times, calendar
+        ]
         if 'calendar_dates.txt' in original.namelist():
-            calendar_dates = FilteredCSV(original, 'calendar_dates.txt',
-                                         {'service_id': service_ids})
-
-        filtereds = [agency, stops, routes, trips, stop_times, calendar]
-        if 'calendar_dates.txt' in original.namelist():
+            calendar_dates: FilteredCSV = FilteredCSV(
+                original, 'calendar_dates.txt', {'service_id': service_ids}
+            )
             filtereds.append(calendar_dates)
         for filtered in filtereds:
             filtered.write(trimmed)
-    return {'stop_id_departure': stop_id_departure,
-            'stop_id_arrival': stop_id_arrival}
+    return {'stop_id_departure': departure_stop_id,
+            'stop_id_arrival': arrival_stop_id}
