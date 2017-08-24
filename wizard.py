@@ -68,7 +68,12 @@ class FilteredCSV:
             rows = self.rows
         self.rows: typing.Collection[CSV_Row] = tuple(filter(self.match, rows))
 
-    def update_restrictions(self, *args, **kwargs) -> None:
+    def update_restrictions(
+            #`*args` could more generally be something like
+            #`typing.Mapping[str, typing.Collection[str]]`. Using
+            #`CSV_Restrictions` for simplicity and clarity.
+            self, *args: CSV_Restrictions, **kwargs: typing.Collection[str]
+    ) -> None:
         self._restrictions.update(*args, **kwargs)
         self._apply_restrictions()
 
@@ -118,8 +123,7 @@ def _get_choice(
         rows: typing.Collection[CSV_Row],
         id_field: str,
         display_fields: typing.Sequence[str],
-        any_choice: bool=False
-) -> typing.Optional[str]:
+) -> str:
 
     def display(row: CSV_Row) -> str:
         for display_field in display_fields:
@@ -133,23 +137,15 @@ def _get_choice(
     question: str = 'Please choose a{vow} {nam}.'.format(
         nam=name, vow='n' if name[0] in 'aeiou' else ''
     )
-    #This is gross, but it'll be removed in the next commit.
-    choices: typing.List[str] = []
-    if any_choice:
-        choices.append('any')
     #TODO: we'll get a ValueError here if `rows` is empty.
-    _choices, sorted_rows = zip(*sorted(
+    choices, sorted_rows = zip(*sorted(
         zip(map(display, rows), rows),
         #We don't want lexicographic sorting, since we likely can't compare
         #elements of `rows` with one another.
         key=lambda pair: pair[0],
     ))
-    choices.extend(_choices)
     index: int = chooser.Chooser(question, choices)(window)
-    if any_choice:
-        return None if not index else sorted_rows[index - 1][id_field]
-    else:
-        return sorted_rows[index][id_field]
+    return sorted_rows[index][id_field]
 get_choice = functools.partial(curses.wrapper, _get_choice)
 
 def stop_sequences(rows: typing.Iterable[CSV_Row]) -> typing.Iterable[int]:
@@ -185,39 +181,33 @@ def trim_gtfs(
         route_restrictions: CSV_Restrictions = {}
 
         agency: FilteredCSV = FilteredCSV(original, 'agency.txt', {})
-        agency_id: typing.Optional[str] = get_choice(
+        agency_id: str = get_choice(
             'agency',
             agency.rows,
             'agency_id',
             ('agency_name',),
-            any_choice=True
         )
-        if agency_id is not None:
-            agency.update_restrictions(agency_id={agency_id})
-            route_restrictions.update(agency_id={agency_id})
+        agency.update_restrictions(agency_id={agency_id})
+        route_restrictions.update(agency_id={agency_id})
 
-        route_type: typing.Optional[str] = get_choice(
+        route_type: str = get_choice(
             'route type',
             ROUTE_TYPES,
             'route_type_id',
             ('description',),
-            any_choice=True
         )
-        if route_type is not None:
-            route_restrictions.update(route_type={route_type})
+        route_restrictions.update(route_type={route_type})
 
         routes: FilteredCSV = FilteredCSV(
             original, 'routes.txt', route_restrictions
         )
-        route_id: typing.Optional[str] = get_choice(
+        route_id: str = get_choice(
             'route',
             routes.rows,
             'route_id',
             ('route_long_name', 'route_short_name',),
-            any_choice=True,
         )
-        if route_id is not None:
-            routes.update_restrictions(route_id={route_id})
+        routes.update_restrictions(route_id={route_id})
 
         trips: FilteredCSV = FilteredCSV(
             original, 'trips.txt', {'route_id': routes.values('route_id')},
@@ -228,7 +218,7 @@ def trim_gtfs(
         stops: FilteredCSV = FilteredCSV(
             original, 'stops.txt', {'stop_id': stop_times.values('stop_id')}
         )
-        departure_stop_id: typing.Optional[str] = get_choice(
+        departure_stop_id: str = get_choice(
             'departure stop',
             stops.rows,
             'stop_id',
@@ -266,7 +256,7 @@ def trim_gtfs(
                 stop_id for stop_id, _stop_times in binned_stop_times.items()
                 if max(stop_sequences(_stop_times)) > departure_stop_sequence
             )
-        arrival_stop_id: typing.Optional[str] = get_choice(
+        arrival_stop_id: str = get_choice(
             'arrival stop',
             tuple(
                 row for row in stops.rows if row['stop_id'] in arrival_stop_ids
