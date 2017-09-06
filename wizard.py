@@ -3,12 +3,15 @@ import csv
 import curses
 import functools
 import io
+import logging
 import operator
 import sys
 import typing
 import zipfile
 
 import chooser
+
+logger = logging.getLogger(__name__)
 
 CSV_Row = typing.Dict[str, str]
 CSV_Restrictions = typing.Dict[str, typing.Collection[str]]
@@ -96,7 +99,6 @@ class FilteredCSV:
             fieldnames.update(row.keys())
         #See <http://stackoverflow.com/q/25971205/2899277> for explanation
         #of `io.StringIO` use.
-        #archive is already in the context manager thing or w/e
         csv_buffer: io.StringIO = io.StringIO()
         writer: csv.DictWriter = csv.DictWriter(
             csv_buffer, tuple(fieldnames), dialect='excel'
@@ -135,7 +137,7 @@ def _get_choice(
 
     curses.curs_set(False)
     question: str = 'Please choose a{vow} {nam}.'.format(
-        nam=name, vow='n' if name[0] in 'aeiou' else ''
+        nam=name, vow='n' if name and name[0] in 'aeiou' else ''
     )
     #TODO: we'll get a ValueError here if `rows` is empty.
     choices, sorted_rows = zip(*sorted(
@@ -172,12 +174,12 @@ def trips_through_stop(
     """
 
     return {row['trip_id'] for row in rows if row['stop_id'] == stop_id}
-def trim_gtfs(
+def trim_GTFS(
         filename_original: str,
         filename_trimmed: str
-) -> typing.Dict[str, str]:
-    with zipfile.ZipFile(filename_original, 'r') as original, \
-            zipfile.ZipFile(filename_trimmed, 'w') as trimmed:
+) -> CSV_Row:
+    logger.info('Reading original feed from %s.', filename_original)
+    with zipfile.ZipFile(filename_original, 'r') as original:
         route_restrictions: CSV_Restrictions = {}
 
         agency: FilteredCSV = FilteredCSV(original, 'agency.txt', {})
@@ -187,6 +189,7 @@ def trim_gtfs(
             'agency_id',
             ('agency_name',),
         )
+        logger.debug('Agency ID %s selected.', agency_id)
         agency.update_restrictions(agency_id={agency_id})
         route_restrictions.update(agency_id={agency_id})
 
@@ -196,6 +199,7 @@ def trim_gtfs(
             'route_type_id',
             ('description',),
         )
+        logger.debug('Route type %s selected.', route_type)
         route_restrictions.update(route_type={route_type})
 
         routes: FilteredCSV = FilteredCSV(
@@ -207,6 +211,7 @@ def trim_gtfs(
             'route_id',
             ('route_long_name', 'route_short_name',),
         )
+        logger.debug('Route ID %s selected.', route_id)
         routes.update_restrictions(route_id={route_id})
 
         trips: FilteredCSV = FilteredCSV(
@@ -224,6 +229,7 @@ def trim_gtfs(
             'stop_id',
             ('stop_name', 'stop_code', 'stop_desc')
         )
+        logger.debug('Departure stop ID %s selected.', departure_stop_id)
         trip_ids_through_departure: typing.Set[str] = trips_through_stop(
             stop_times.rows, departure_stop_id
         )
@@ -264,6 +270,7 @@ def trim_gtfs(
             'stop_id',
             ('stop_name', 'stop_code', 'stop_desc')
         )
+        logging.debug('Arrival stop ID %s selected.', arrival_stop_id)
         trip_ids_through_arrival: typing.Set[str] = trips_through_stop(
             stop_times.rows, arrival_stop_id
         )
@@ -291,7 +298,9 @@ def trim_gtfs(
                 original, 'calendar_dates.txt', {'service_id': service_ids}
             )
             filtereds.append(calendar_dates)
-        for filtered in filtereds:
-            filtered.write(trimmed)
+        logger.info('Writing filtered feed to %s.', filename_trimmed)
+        with zipfile.ZipFile(filename_trimmed, 'w') as trimmed:
+            for filtered in filtereds:
+                filtered.write(trimmed)
     return {'stop_id_departure': departure_stop_id,
             'stop_id_arrival': arrival_stop_id}
