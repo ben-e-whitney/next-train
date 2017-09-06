@@ -16,14 +16,6 @@ logger = logging.getLogger(__name__)
 CSV_Row = typing.Dict[str, str]
 CSV_Restrictions = typing.Dict[str, typing.Collection[str]]
 
-with open('route_types.csv', 'r') as f:
-    reader: csv.DictReader = csv.DictReader(
-        f, fieldnames=('route_type_id', 'description'), dialect='unix'
-    )
-    #Skip header. Could also leave `fieldnames` unspecified above.
-    next(reader)
-    ROUTE_TYPES: typing.Tuple[CSV_Row, ...] = tuple(reader)
-
 class FilteredCSV:
     FILE_SIZE_THRESHOLD: int = 1 << 20
     FILE_SIZE_PREFIXES: typing.Tuple[str, ...] = (
@@ -174,6 +166,7 @@ def trips_through_stop(
     """
 
     return {row['trip_id'] for row in rows if row['stop_id'] == stop_id}
+
 def trim_GTFS(
         filename_original: str,
         filename_trimmed: str
@@ -192,6 +185,14 @@ def trim_GTFS(
         logger.debug('Agency ID %s selected.', agency_id)
         agency.update_restrictions(agency_id={agency_id})
         route_restrictions.update(agency_id={agency_id})
+
+        with open('route_types.csv', 'r') as f:
+            reader: csv.DictReader = csv.DictReader(
+                f, fieldnames=('route_type_id', 'description'), dialect='unix'
+            )
+            #Skip header. Could also leave `fieldnames` unspecified above.
+            next(reader)
+            ROUTE_TYPES: typing.Tuple[CSV_Row, ...] = tuple(reader)
 
         route_type: str = get_choice(
             'route type',
