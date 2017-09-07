@@ -17,13 +17,16 @@ FEED_FILENAME = 'feed.zip'
 CONFIG_FILENAME = 'config.json'
 
 DATE_FORMAT = '%Y%m%d'
-#We are not supposed to assume a zero-padded hour, but the parser seems to
-#not complain if it's given one with this format.
 TIME_FORMAT = '%H:%M:%S'
+TIME_FORMAT_DISPLAY = '%H:%M'
 
 WEEKDAYS: typing.Tuple[str, ...] = tuple(map(
     '{}day'.format, ('mon', 'tues', 'wednes', 'thurs', 'fri', 'sat', 'sun')
 ))
+
+def parse_time(time: str) -> datetime.time:
+    h, m, s = map(int, time.split(':'))
+    return datetime.time(h % 24, m, s)
 
 def stop_names(
         filename: str,
@@ -54,9 +57,6 @@ def trips(
             datetime.datetime.strptime(row['end_date'], DATE_FORMAT).date()
         )
 
-    #Not using the proper time format here. See <https://developers.google.com/
-    #transit/gtfs/reference/stop_times-file>. It seems to work even if the hour
-    #isn't zero-padded, which the specification allows.
     def departure_arrival_pairs(
             stop_times: typing.List[wizard.CSV_Row]
     ) -> typing.Generator[
@@ -77,17 +77,13 @@ def trips(
                 )
         last_arrival_index = max(arrivals_by_index.keys())
         for i, departure in departures_by_index.items():
-            departure_time = datetime.datetime.strptime(
-                departure['departure_time'], TIME_FORMAT
-            ).time()
+            departure_time = parse_time(departure['departure_time'])
             #Possibly this is already handled in the wizard. Not checking.
             if departure_time >= time and i < last_arrival_index:
                 arrival: wizard.CSV_Row = arrivals_by_index[min(
                     j for j in arrivals_by_index if i < j
                 )]
-                arrival_time = datetime.datetime.strptime(
-                    arrival['arrival_time'], TIME_FORMAT
-                ).time()
+                arrival_time = parse_time(arrival['arrival_time'])
                 yield (departure_time, arrival_time)
 
     with zipfile.ZipFile(filename, 'r') as feed:
@@ -131,6 +127,12 @@ parser.add_argument(
     '--verbose',
     action='store_true',
     help='enable verbose logging',
+)
+parser.add_argument(
+    '--n',
+    type=int,
+    default=3,
+    help='number of trains to display',
 )
 parser.add_argument(
     'feed',
@@ -183,14 +185,14 @@ else:
 
 departure_name, arrival_name = stop_names(trimmed_feed, config)
 for departure_time, arrival_time in itertools.islice(
-        trips(trimmed_feed, config), 10
+        trips(trimmed_feed, config), args.n
 ):
     print(
         'There is a train leaving {dna} at {dtm} that will arrive at {ana} at '
-        '{atm}'.format(
+        '{atm}.'.format(
             dna=departure_name,
             ana=arrival_name,
-            dtm=departure_time.strftime(TIME_FORMAT),
-            atm=arrival_time.strftime(TIME_FORMAT),
+            dtm=departure_time.strftime(TIME_FORMAT_DISPLAY),
+            atm=arrival_time.strftime(TIME_FORMAT_DISPLAY),
         )
     )
