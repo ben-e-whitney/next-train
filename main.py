@@ -37,8 +37,10 @@ def stop_names(
         stops_by_id: typing.Dict[str, typing.List[wizard.CSV_Row]] = (
             wizard.binned_by_field(stops.rows, 'stop_id')
         )
-        return tuple(stops_by_id[config[key]][0]['stop_name']
-                     for key in ('stop_id_departure', 'stop_id_arrival'))
+        get_name: typing.Callable[[str], str] = (
+            lambda key: stops_by_id[config[key]][0]['stop_name']
+        )
+        return get_name('stop_id_departure'), get_name('stop_id_arrival')
 
 def trips(
         filename: str,
@@ -101,7 +103,9 @@ def trips(
             exceptions: typing.Dict[str, typing.List[wizard.CSV_Row]] = (
                 wizard.binned_by_field(calendar_dates.rows, 'exception_type')
             )
-            getter:operator.itemgetter = operator.itemgetter('service_id')
+            getter: typing.Callable[[wizard.CSV_Row], str] = (
+                operator.itemgetter('service_id')
+            )
             if '1' in exceptions:
                 service_ids.update(map(getter, exceptions['1']))
             if '2' in exceptions:
@@ -145,14 +149,17 @@ args: argparse.Namespace = parser.parse_args()
 logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING)
 logger: logging.Logger = logging.getLogger(__name__)
 
+trimmed_feed: str
+config_file: str
+config: wizard.CSV_Row
 if args.feed is not None:
-    trimmed_feed: str = os.path.join(
+    trimmed_feed = os.path.join(
         xdg.BaseDirectory.save_data_path(APPLICATION_NAME),
         FEED_FILENAME
     )
     logger.debug('Filtered feed location set to %s.', trimmed_feed)
-    config: wizard.CSV_Row = wizard.trim_GTFS(args.feed, trimmed_feed)
-    config_file: str = os.path.join(
+    config = wizard.trim_GTFS(args.feed, trimmed_feed)
+    config_file = os.path.join(
         xdg.BaseDirectory.save_config_path(APPLICATION_NAME),
         CONFIG_FILENAME
     )
@@ -161,20 +168,20 @@ if args.feed is not None:
         json.dump(config, f)
 else:
     for directory in xdg.BaseDirectory.load_config_paths(APPLICATION_NAME):
-        config_file: str = os.path.join(directory, CONFIG_FILENAME)
+        config_file = os.path.join(directory, CONFIG_FILENAME)
         if os.path.isfile(config_file):
             logger.info(
                 'Configuration file will be read from %s.', config_file
             )
             with open(config_file, 'r') as f:
-                config: wizard.CSV_Row = json.load(f)
+                config = json.load(f)
             break
         else:
             logger.debug('No configuration file found in %s.', directory)
     else:
         raise RuntimeError('No configuration file found.')
     for directory in xdg.BaseDirectory.load_data_paths(APPLICATION_NAME):
-        trimmed_feed: str = os.path.join(directory, FEED_FILENAME)
+        trimmed_feed = os.path.join(directory, FEED_FILENAME)
         if os.path.isfile(trimmed_feed):
             logger.info('Feed will be read from %s.', trimmed_feed)
         else:
