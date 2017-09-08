@@ -10,15 +10,16 @@ import zipfile
 
 import xdg.BaseDirectory
 
+import gtfs
 import wizard
 
 APPLICATION_NAME: str = 'next-train'
-FEED_FILENAME = 'feed.zip'
-CONFIG_FILENAME = 'config.json'
+FEED_FILENAME: str = 'feed.zip'
+CONFIG_FILENAME: str = 'config.json'
 
-DATE_FORMAT = '%Y%m%d'
-TIME_FORMAT = '%H:%M:%S'
-TIME_FORMAT_DISPLAY = '%H:%M'
+DATE_FORMAT: str = '%Y%m%d'
+TIME_FORMAT: str = '%H:%M:%S'
+TIME_FORMAT_DISPLAY: str = '%H:%M'
 
 WEEKDAYS: typing.Tuple[str, ...] = tuple(map(
     '{}day'.format, ('mon', 'tues', 'wednes', 'thurs', 'fri', 'sat', 'sun')
@@ -30,12 +31,12 @@ def parse_time(time: str) -> datetime.time:
 
 def stop_names(
         filename: str,
-        config: wizard.CSV_Row
+        config: gtfs.CSV_Row
 ) -> typing.Tuple[str, str]:
     with zipfile.ZipFile(filename, 'r') as feed:
-        stops: wizard.FilteredCSV = wizard.FilteredCSV(feed, 'stops.txt', {})
-        stops_by_id: typing.Dict[str, typing.List[wizard.CSV_Row]] = (
-            wizard.binned_by_field(stops.rows, 'stop_id')
+        stops: gtfs.FilteredCSV = gtfs.FilteredCSV(feed, 'stops.txt', {})
+        stops_by_id: typing.Dict[str, typing.List[gtfs.CSV_Row]] = (
+            gtfs.binned_by_field(stops.rows, 'stop_id')
         )
         get_name: typing.Callable[[str], str] = (
             lambda key: stops_by_id[config[key]][0]['stop_name']
@@ -44,7 +45,7 @@ def stop_names(
 
 def trips(
         filename: str,
-        config: wizard.CSV_Row
+        config: gtfs.CSV_Row
 ) -> typing.Generator[typing.Tuple[datetime.time, datetime.time], None, None]:
     now: datetime.datetime = datetime.datetime.now()
     today: datetime.date = now.date()
@@ -52,7 +53,7 @@ def trips(
     weekday: str = WEEKDAYS[today.weekday()]
     time: datetime.time = now.time()
 
-    def today_in_service_interval(row: wizard.CSV_Row) -> bool:
+    def today_in_service_interval(row: gtfs.CSV_Row) -> bool:
         return (
             datetime.datetime.strptime(row['start_date'], DATE_FORMAT).date()
             <= today <=
@@ -60,7 +61,7 @@ def trips(
         )
 
     def departure_arrival_pairs(
-            stop_times: typing.List[wizard.CSV_Row]
+            stop_times: typing.List[gtfs.CSV_Row]
     ) -> typing.Generator[
         typing.Tuple[datetime.time, datetime.time], None, None
     ]:
@@ -82,14 +83,14 @@ def trips(
             departure_time = parse_time(departure['departure_time'])
             #Possibly this is already handled in the wizard. Not checking.
             if departure_time >= time and i < last_arrival_index:
-                arrival: wizard.CSV_Row = arrivals_by_index[min(
+                arrival: gtfs.CSV_Row = arrivals_by_index[min(
                     j for j in arrivals_by_index if i < j
                 )]
                 arrival_time = parse_time(arrival['arrival_time'])
                 yield (departure_time, arrival_time)
 
     with zipfile.ZipFile(filename, 'r') as feed:
-        calendar: wizard.FilteredCSV = wizard.FilteredCSV(
+        calendar: gtfs.FilteredCSV = gtfs.FilteredCSV(
             feed, 'calendar.txt', {weekday: '1'}
         )
         service_ids: typing.Set[str] = set(map(
@@ -97,27 +98,27 @@ def trips(
             filter(today_in_service_interval, calendar.rows)
         ))
         if 'calendar_dates.txt' in feed.namelist():
-            calendar_dates: wizard.FilteredCSV = wizard.FilteredCSV(
+            calendar_dates: gtfs.FilteredCSV = gtfs.FilteredCSV(
                 feed, 'calendar_dates.txt', {'date': date}
             )
-            exceptions: typing.Dict[str, typing.List[wizard.CSV_Row]] = (
-                wizard.binned_by_field(calendar_dates.rows, 'exception_type')
+            exceptions: typing.Dict[str, typing.List[gtfs.CSV_Row]] = (
+                gtfs.binned_by_field(calendar_dates.rows, 'exception_type')
             )
-            getter: typing.Callable[[wizard.CSV_Row], str] = (
+            getter: typing.Callable[[gtfs.CSV_Row], str] = (
                 operator.itemgetter('service_id')
             )
             if '1' in exceptions:
                 service_ids.update(map(getter, exceptions['1']))
             if '2' in exceptions:
                 service_ids.difference_update(map(getter, exceptions['2']))
-        trips: wizard.FilteredCSV = wizard.FilteredCSV(
+        trips: gtfs.FilteredCSV = gtfs.FilteredCSV(
             feed, 'trips.txt', {'service_id': service_ids}
         )
-        stop_times: wizard.FilteredCSV = wizard.FilteredCSV(
+        stop_times: gtfs.FilteredCSV = gtfs.FilteredCSV(
             feed, 'stop_times.txt', {'trip_id': trips.values('trip_id')}
         )
-        trip_stop_times: typing.Dict[str, typing.List[wizard.CSV_Row]] = (
-            wizard.binned_by_field(stop_times.rows, 'trip_id')
+        trip_stop_times: typing.Dict[str, typing.List[gtfs.CSV_Row]] = (
+            gtfs.binned_by_field(stop_times.rows, 'trip_id')
         )
         yield from sorted(itertools.chain.from_iterable(map(
             departure_arrival_pairs,
@@ -151,14 +152,14 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 trimmed_feed: str
 config_file: str
-config: wizard.CSV_Row
+config: gtfs.CSV_Row
 if args.feed is not None:
     trimmed_feed = os.path.join(
         xdg.BaseDirectory.save_data_path(APPLICATION_NAME),
         FEED_FILENAME
     )
     logger.debug('Filtered feed location set to %s.', trimmed_feed)
-    config = wizard.trim_GTFS(args.feed, trimmed_feed)
+    config = wizard.trim_gtfs(args.feed, trimmed_feed)
     config_file = os.path.join(
         xdg.BaseDirectory.save_config_path(APPLICATION_NAME),
         CONFIG_FILENAME

@@ -1,8 +1,10 @@
-import collections
+"""
+Trim GTFS feeds according to user input.
+"""
+
 import csv
 import curses
 import functools
-import io
 import logging
 import operator
 import sys
@@ -10,116 +12,19 @@ import typing
 import zipfile
 
 import chooser
+import gtfs
 
 logger = logging.getLogger(__name__)
-
-CSV_Row = typing.Dict[str, str]
-CSV_Restrictions = typing.Dict[str, typing.Collection[str]]
-
-class FilteredCSV:
-    FILE_SIZE_THRESHOLD: int = 1 << 20
-    FILE_SIZE_PREFIXES: typing.Tuple[str, ...] = (
-        '', 'Ki', 'Mi', 'Gi', 'Ti', 'Pi', 'Ei', 'Zi', 'Yi'
-    )
-    FILE_SIZE_FACTOR: int = 1 << 10
-
-    def __init__(
-            self,
-            archive: zipfile.ZipFile,
-            filename: str,
-            restrictions: CSV_Restrictions,
-    ) -> None:
-        self.filename: str = filename
-        self._restrictions: CSV_Restrictions = restrictions
-        self.info: zipfile.ZipInfo = archive.getinfo(self.filename)
-        display_loading_message: bool = (
-            self.info.file_size > self.FILE_SIZE_THRESHOLD
-        )
-        if display_loading_message:
-            sys.stdout.write('Loading {nam} (about {siz}) ... '.format(
-                nam=self.filename, siz=self._format_file_size()))
-            sys.stdout.flush()
-        with archive.open(self.filename) as f:
-            #See <http://stackoverflow.com/q/5627954/2899277> for explanation
-            #of `io.TextIOWrapper` use.
-            #Defining temporary variable `rows` here so we can be more precise
-            #about the type of `self.rows`. In particular, later on we will
-            #want to call `len` on it, so it needs to belong to `typing.Sized`.
-            rows: typing.Iterable[CSV_Row] = (
-                csv.DictReader(io.TextIOWrapper(f), dialect='excel')
-            )
-            self._apply_restrictions(rows=rows)
-        if display_loading_message:
-            sys.stdout.write('done.\n')
-
-    def match(self, row: CSV_Row) -> bool:
-        return all(row[key] in values
-                   for key, values in self._restrictions.items())
-
-    def _apply_restrictions(
-            self, rows: typing.Optional[typing.Iterable[CSV_Row]]=None
-    ) -> None:
-        if rows is None:
-            rows = self.rows
-        self.rows: typing.Collection[CSV_Row] = tuple(filter(self.match, rows))
-
-    def update_restrictions(
-            #`*args` could more generally be something like
-            #`typing.Mapping[str, typing.Collection[str]]`. Using
-            #`CSV_Restrictions` for simplicity and clarity.
-            self, *args: CSV_Restrictions, **kwargs: typing.Collection[str]
-    ) -> None:
-        self._restrictions.update(*args, **kwargs)
-        self._apply_restrictions()
-
-    def values(self, fieldname: str) -> typing.Set[str]:
-        return set(map(operator.itemgetter(fieldname), self.rows))
-
-    def _format_file_size(self, figures: int=2) -> str:
-        n: int = self.info.file_size
-        for prefix in self.FILE_SIZE_PREFIXES:
-            if n < self.FILE_SIZE_FACTOR:
-                break
-            else:
-                n //= self.FILE_SIZE_FACTOR
-        ndigits: int = -(len(str(int(n))) - figures)
-        return '{num} {pre}B'.format(num=int(round(n, ndigits)), pre=prefix)
-
-    def write(self, archive: zipfile.ZipFile) -> None:
-        fieldnames: set = set()
-        for row in self.rows:
-            fieldnames.update(row.keys())
-        #See <http://stackoverflow.com/q/25971205/2899277> for explanation
-        #of `io.StringIO` use.
-        csv_buffer: io.StringIO = io.StringIO()
-        writer: csv.DictWriter = csv.DictWriter(
-            csv_buffer, tuple(fieldnames), dialect='excel'
-        )
-        writer.writeheader()
-        for row in self.rows:
-            writer.writerow(row)
-        archive.writestr(self.filename, csv_buffer.getvalue())
-
-def binned_by_field(
-        rows: typing.Iterable[CSV_Row],
-        field: str
-) -> typing.Dict[str, typing.List[CSV_Row]]:
-    binned: typing.Dict[str, typing.List[CSV_Row]] = (
-        collections.defaultdict(list)
-    )
-    for row in rows:
-        binned[row[field]].append(row)
-    return dict(binned)
 
 def _get_choice(
         window,
         name: str,
-        rows: typing.Collection[CSV_Row],
+        rows: typing.Collection[gtfs.CSV_Row],
         id_field: str,
         display_fields: typing.Sequence[str],
 ) -> str:
 
-    def display(row: CSV_Row) -> str:
+    def display(row: gtfs.CSV_Row) -> str:
         for display_field in display_fields:
             if display_field in row and row[display_field]:
                 return row[display_field]
@@ -142,11 +47,13 @@ def _get_choice(
     return sorted_rows[index][id_field]
 get_choice = functools.partial(curses.wrapper, _get_choice)
 
-def stop_sequences(rows: typing.Iterable[CSV_Row]) -> typing.Iterable[int]:
+def stop_sequences(
+        rows: typing.Iterable[gtfs.CSV_Row]
+) -> typing.Iterable[int]:
     return map(int, map(operator.itemgetter('stop_sequence'), rows))
 
 def trips_through_stop(
-        rows: typing.Iterable[CSV_Row],
+        rows: typing.Iterable[gtfs.CSV_Row],
         stop_id: str
 ) -> typing.Set[str]:
     """
@@ -167,15 +74,15 @@ def trips_through_stop(
 
     return {row['trip_id'] for row in rows if row['stop_id'] == stop_id}
 
-def trim_GTFS(
+def trim_gtfs(
         filename_original: str,
         filename_trimmed: str
-) -> CSV_Row:
+) -> gtfs.CSV_Row:
     logger.info('Reading original feed from %s.', filename_original)
     with zipfile.ZipFile(filename_original, 'r') as original:
-        route_restrictions: CSV_Restrictions = {}
+        route_restrictions: gtfs.CSV_Restrictions = {}
 
-        agency: FilteredCSV = FilteredCSV(original, 'agency.txt', {})
+        agency: gtfs.FilteredCSV = gtfs.FilteredCSV(original, 'agency.txt', {})
         agency_id: str = get_choice(
             'agency',
             agency.rows,
@@ -192,7 +99,7 @@ def trim_GTFS(
             )
             #Skip header. Could also leave `fieldnames` unspecified above.
             next(reader)
-            ROUTE_TYPES: typing.Tuple[CSV_Row, ...] = tuple(reader)
+            ROUTE_TYPES: typing.Tuple[gtfs.CSV_Row, ...] = tuple(reader)
 
         route_type: str = get_choice(
             'route type',
@@ -203,7 +110,7 @@ def trim_GTFS(
         logger.debug('Route type %s selected.', route_type)
         route_restrictions.update(route_type={route_type})
 
-        routes: FilteredCSV = FilteredCSV(
+        routes: gtfs.FilteredCSV = gtfs.FilteredCSV(
             original, 'routes.txt', route_restrictions
         )
         route_id: str = get_choice(
@@ -215,13 +122,13 @@ def trim_GTFS(
         logger.debug('Route ID %s selected.', route_id)
         routes.update_restrictions(route_id={route_id})
 
-        trips: FilteredCSV = FilteredCSV(
+        trips: gtfs.FilteredCSV = gtfs.FilteredCSV(
             original, 'trips.txt', {'route_id': routes.values('route_id')},
         )
-        stop_times: FilteredCSV = FilteredCSV(
+        stop_times: gtfs.FilteredCSV = gtfs.FilteredCSV(
             original, 'stop_times.txt', {'trip_id': trips.values('trip_id')}
         )
-        stops: FilteredCSV = FilteredCSV(
+        stops: gtfs.FilteredCSV = gtfs.FilteredCSV(
             original, 'stops.txt', {'stop_id': stop_times.values('stop_id')}
         )
         departure_stop_id: str = get_choice(
@@ -237,13 +144,13 @@ def trim_GTFS(
         stop_times.update_restrictions(trip_id=trip_ids_through_departure)
 
         arrival_stop_ids: set = set()
-        for trip_stop_times in binned_by_field(
+        for trip_stop_times in gtfs.binned_by_field(
                 stop_times.rows, 'trip_id'
         ).values():
             #`trip_stop_times` is a list of the stops ('StopTimes') that a
             #particular trip going through stop `departure_stop_id` makes
-            binned_stop_times: typing.Dict[str, typing.List[CSV_Row]] = (
-                binned_by_field(trip_stop_times, 'stop_id')
+            binned_stop_times: typing.Dict[str, typing.List[gtfs.CSV_Row]] = (
+                gtfs.binned_by_field(trip_stop_times, 'stop_id')
             )
             #I don't see why you'd ever have multiple visits to a single stop
             #during one trip, but I don't want to read the reference closely
@@ -288,14 +195,14 @@ def trim_GTFS(
         agency.update_restrictions(agency_id=routes.values('agency_id'))
 
         service_ids: typing.Set[str] = trips.values('service_id')
-        calendar: FilteredCSV = FilteredCSV(
+        calendar: gtfs.FilteredCSV = gtfs.FilteredCSV(
             original, 'calendar.txt', {'service_id': service_ids}
         )
-        filtereds: typing.List[FilteredCSV] = [
+        filtereds: typing.List[gtfs.FilteredCSV] = [
             agency, stops, routes, trips, stop_times, calendar
         ]
         if 'calendar_dates.txt' in original.namelist():
-            calendar_dates: FilteredCSV = FilteredCSV(
+            calendar_dates: gtfs.FilteredCSV = gtfs.FilteredCSV(
                 original, 'calendar_dates.txt', {'service_id': service_ids}
             )
             filtereds.append(calendar_dates)
