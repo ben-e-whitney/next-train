@@ -22,7 +22,7 @@ TIME_FORMAT: str = '%H:%M:%S'
 TIME_FORMAT_DISPLAY: str = '%H:%M'
 
 WEEKDAYS: typing.Tuple[str, ...] = tuple(map(
-    '{}day'.format, ('mon', 'tues', 'wednes', 'thurs', 'fri', 'sat', 'sun')
+    '{}day'.format, ('mon', 'tues', 'wednes', 'thurs', 'fri', 'satur', 'sun')
 ))
 
 def parse_time(time: str) -> datetime.time:
