@@ -192,15 +192,30 @@ else:
         raise RuntimeError('No GTFS feed found.')
 
 departure_name, arrival_name = stop_names(trimmed_feed, config)
+vehicle_name, vehicles_name = {
+    '0': ('tram', 'trams'),
+    '1': ('train', 'trains'),
+    '2': ('train', 'trains'),
+    '3': ('bus', 'buses'),
+    '4': ('ferry', 'ferries'),
+    '5': ('cable car', 'cable cars'),
+    '6': ('gondola', 'gondolas'),
+    '7': ('train', 'trains')
+}[config['route_type_id']]
+trip_found: bool = False
 for departure_time, arrival_time in itertools.islice(
         trips(trimmed_feed, config), args.n
 ):
     print(
-        'There is a train leaving {dna} at {dtm} that will arrive at {ana} at '
+        'There is a {vhn} leaving {dna} at {dtm} that will arrive at {ana} at '
         '{atm}.'.format(
+            vhn=vehicle_name,
             dna=departure_name,
             ana=arrival_name,
             dtm=departure_time.strftime(TIME_FORMAT_DISPLAY),
             atm=arrival_time.strftime(TIME_FORMAT_DISPLAY),
         )
     )
+    trip_found = True
+if not trip_found:
+    print('No {vhn} found.'.format(vhn=vehicles_name))

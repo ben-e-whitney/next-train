@@ -78,6 +78,7 @@ def trim_gtfs(
         filename_original: str,
         filename_trimmed: str
 ) -> gtfs.CSV_Row:
+    config: gtfs.CSV_Row = {}
     logger.info('Reading original feed from %s.', filename_original)
     with zipfile.ZipFile(filename_original, 'r') as original:
         route_restrictions: gtfs.CSV_Restrictions = {}
@@ -107,6 +108,7 @@ def trim_gtfs(
             'route_type_id',
             ('description',),
         )
+        config.update({'route_type_id': route_type})
         logger.debug('Route type %s selected.', route_type)
         route_restrictions.update(route_type={route_type})
 
@@ -138,6 +140,7 @@ def trim_gtfs(
             ('stop_name', 'stop_code', 'stop_desc')
         )
         logger.debug('Departure stop ID %s selected.', departure_stop_id)
+        config.update({'stop_id_departure': departure_stop_id})
         trip_ids_through_departure: typing.Set[str] = trips_through_stop(
             stop_times.rows, departure_stop_id
         )
@@ -179,6 +182,7 @@ def trim_gtfs(
             ('stop_name', 'stop_code', 'stop_desc')
         )
         logging.debug('Arrival stop ID %s selected.', arrival_stop_id)
+        config.update({'stop_id_arrival': arrival_stop_id})
         trip_ids_through_arrival: typing.Set[str] = trips_through_stop(
             stop_times.rows, arrival_stop_id
         )
@@ -210,5 +214,4 @@ def trim_gtfs(
         with zipfile.ZipFile(filename_trimmed, 'w') as trimmed:
             for filtered in filtereds:
                 filtered.write(trimmed)
-    return {'stop_id_departure': departure_stop_id,
-            'stop_id_arrival': arrival_stop_id}
+    return config
