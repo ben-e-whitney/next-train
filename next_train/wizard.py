@@ -11,8 +11,8 @@ import sys
 import typing
 import zipfile
 
-import chooser
-import gtfs
+from . import chooser
+from . import gtfs
 
 logger = logging.getLogger(__name__)
 

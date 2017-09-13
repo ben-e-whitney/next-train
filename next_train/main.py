@@ -10,8 +10,8 @@ import zipfile
 
 import xdg.BaseDirectory
 
-import gtfs
-import wizard
+from . import gtfs
+from . import wizard
 
 logger: logging.Logger = logging.getLogger(__name__)
 
