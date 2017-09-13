@@ -13,6 +13,8 @@ import xdg.BaseDirectory
 import gtfs
 import wizard
 
+logger: logging.Logger = logging.getLogger(__name__)
+
 APPLICATION_NAME: str = 'next-train'
 FEED_FILENAME: str = 'feed.zip'
 CONFIG_FILENAME: str = 'config.json'
@@ -125,97 +127,103 @@ def trips(
             trip_stop_times.values()
         )))
 
-parser: argparse.ArgumentParser = argparse.ArgumentParser(
-    description='Find the next train from one stop to another.'
-)
-parser.add_argument(
-    '--verbose',
-    action='store_true',
-    help='enable verbose logging',
-)
-parser.add_argument(
-    '--n',
-    type=int,
-    default=3,
-    help='number of trains to display',
-)
-parser.add_argument(
-    'feed',
-    nargs='?',
-    default=None,
-    help='GTFS feed to filter',
-)
-args: argparse.Namespace = parser.parse_args()
 
-logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING)
-logger: logging.Logger = logging.getLogger(__name__)
+def main() -> None:
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
+        description='Find the next train from one stop to another.'
+    )
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help='enable verbose logging',
+    )
+    parser.add_argument(
+        '--n',
+        type=int,
+        default=3,
+        help='number of trains to display',
+    )
+    parser.add_argument(
+        'feed',
+        nargs='?',
+        default=None,
+        help='GTFS feed to filter',
+    )
+    args: argparse.Namespace = parser.parse_args()
 
-trimmed_feed: str
-config_file: str
-config: gtfs.CSV_Row
-if args.feed is not None:
-    trimmed_feed = os.path.join(
-        xdg.BaseDirectory.save_data_path(APPLICATION_NAME),
-        FEED_FILENAME
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING
     )
-    logger.debug('Filtered feed location set to %s.', trimmed_feed)
-    config = wizard.trim_gtfs(args.feed, trimmed_feed)
-    config_file = os.path.join(
-        xdg.BaseDirectory.save_config_path(APPLICATION_NAME),
-        CONFIG_FILENAME
-    )
-    logger.debug('Configuration file location set to %s.', config_file)
-    with open(config_file, 'w') as f:
-        json.dump(config, f)
-else:
-    for directory in xdg.BaseDirectory.load_config_paths(APPLICATION_NAME):
-        config_file = os.path.join(directory, CONFIG_FILENAME)
-        if os.path.isfile(config_file):
-            logger.info(
-                'Configuration file will be read from %s.', config_file
-            )
-            with open(config_file, 'r') as f:
-                config = json.load(f)
+
+    trimmed_feed: str
+    config_file: str
+    config: gtfs.CSV_Row
+    if args.feed is not None:
+        trimmed_feed = os.path.join(
+            xdg.BaseDirectory.save_data_path(APPLICATION_NAME),
+            FEED_FILENAME
+        )
+        logger.debug('Filtered feed location set to %s.', trimmed_feed)
+        config = wizard.trim_gtfs(args.feed, trimmed_feed)
+        config_file = os.path.join(
+            xdg.BaseDirectory.save_config_path(APPLICATION_NAME),
+            CONFIG_FILENAME
+        )
+        logger.debug('Configuration file location set to %s.', config_file)
+        with open(config_file, 'w') as f:
+            json.dump(config, f)
+    else:
+        for directory in xdg.BaseDirectory.load_config_paths(APPLICATION_NAME):
+            config_file = os.path.join(directory, CONFIG_FILENAME)
+            if os.path.isfile(config_file):
+                logger.info(
+                    'Configuration file will be read from %s.', config_file
+                )
+                with open(config_file, 'r') as f:
+                    config = json.load(f)
+                break
+            else:
+                logger.debug('No configuration file found in %s.', directory)
+        else:
+            raise RuntimeError('No configuration file found.')
+        for directory in xdg.BaseDirectory.load_data_paths(APPLICATION_NAME):
+            trimmed_feed = os.path.join(directory, FEED_FILENAME)
+            if os.path.isfile(trimmed_feed):
+                logger.info('Feed will be read from %s.', trimmed_feed)
+            else:
+                logger.debug('No feed found in %s.', directory)
             break
         else:
-            logger.debug('No configuration file found in %s.', directory)
-    else:
-        raise RuntimeError('No configuration file found.')
-    for directory in xdg.BaseDirectory.load_data_paths(APPLICATION_NAME):
-        trimmed_feed = os.path.join(directory, FEED_FILENAME)
-        if os.path.isfile(trimmed_feed):
-            logger.info('Feed will be read from %s.', trimmed_feed)
-        else:
-            logger.debug('No feed found in %s.', directory)
-        break
-    else:
-        raise RuntimeError('No GTFS feed found.')
+            raise RuntimeError('No GTFS feed found.')
 
-departure_name, arrival_name = stop_names(trimmed_feed, config)
-vehicle_name, vehicles_name = {
-    '0': ('tram', 'trams'),
-    '1': ('train', 'trains'),
-    '2': ('train', 'trains'),
-    '3': ('bus', 'buses'),
-    '4': ('ferry', 'ferries'),
-    '5': ('cable car', 'cable cars'),
-    '6': ('gondola', 'gondolas'),
-    '7': ('train', 'trains')
-}[config['route_type_id']]
-trip_found: bool = False
-for departure_time, arrival_time in itertools.islice(
-        trips(trimmed_feed, config), args.n
-):
-    print(
-        'There is a {vhn} leaving {dna} at {dtm} that will arrive at {ana} at '
-        '{atm}.'.format(
-            vhn=vehicle_name,
-            dna=departure_name,
-            ana=arrival_name,
-            dtm=departure_time.strftime(TIME_FORMAT_DISPLAY),
-            atm=arrival_time.strftime(TIME_FORMAT_DISPLAY),
+    departure_name, arrival_name = stop_names(trimmed_feed, config)
+    vehicle_name, vehicles_name = {
+        '0': ('tram', 'trams'),
+        '1': ('train', 'trains'),
+        '2': ('train', 'trains'),
+        '3': ('bus', 'buses'),
+        '4': ('ferry', 'ferries'),
+        '5': ('cable car', 'cable cars'),
+        '6': ('gondola', 'gondolas'),
+        '7': ('train', 'trains')
+    }[config['route_type_id']]
+    trip_found: bool = False
+    for departure_time, arrival_time in itertools.islice(
+            trips(trimmed_feed, config), args.n
+    ):
+        print(
+            'There is a {vhn} leaving {dna} at {dtm} that will arrive at '
+            '{ana} at {atm}.'.format(
+                vhn=vehicle_name,
+                dna=departure_name,
+                ana=arrival_name,
+                dtm=departure_time.strftime(TIME_FORMAT_DISPLAY),
+                atm=arrival_time.strftime(TIME_FORMAT_DISPLAY),
+            )
         )
-    )
-    trip_found = True
-if not trip_found:
-    print('No {vhn} found.'.format(vhn=vehicles_name))
+        trip_found = True
+    if not trip_found:
+        print('No {vhn} found.'.format(vhn=vehicles_name))
+
+if __name__ == '__main__':
+    main()
