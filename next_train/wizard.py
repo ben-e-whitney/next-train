@@ -7,6 +7,7 @@ import curses
 import functools
 import logging
 import operator
+import os
 import sys
 import typing
 import zipfile
@@ -15,6 +16,10 @@ from . import chooser
 from . import gtfs
 
 logger = logging.getLogger(__name__)
+
+ROUTE_TYPES_FILENAME: str = os.path.join(
+    os.path.dirname(__file__), 'route_types.csv'
+)
 
 def _get_choice(
         window,
@@ -94,7 +99,7 @@ def trim_gtfs(
         agency.update_restrictions(agency_id={agency_id})
         route_restrictions.update(agency_id={agency_id})
 
-        with open('route_types.csv', 'r') as f:
+        with open(ROUTE_TYPES_FILENAME, 'r') as f:
             reader: csv.DictReader = csv.DictReader(
                 f, fieldnames=('route_type_id', 'description'), dialect='unix'
             )
