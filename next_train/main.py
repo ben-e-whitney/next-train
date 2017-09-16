@@ -20,6 +20,7 @@ FEED_FILENAME: str = 'feed.zip'
 CONFIG_FILENAME: str = 'config.json'
 
 DATE_FORMAT: str = '%Y%m%d'
+DATE_FORMAT_DISPLAY: str = '%m-%d'
 TIME_FORMAT: str = '%H:%M:%S'
 TIME_FORMAT_DISPLAY: str = '%H:%M'
 
@@ -47,18 +48,15 @@ def stop_names(
 
 def trips(
         filename: str,
-        config: gtfs.CSV_Row
+        config: gtfs.CSV_Row,
+        date: datetime.date,
+        time: datetime.time
 ) -> typing.Generator[typing.Tuple[datetime.time, datetime.time], None, None]:
-    now: datetime.datetime = datetime.datetime.now()
-    today: datetime.date = now.date()
-    date: str = today.strftime(DATE_FORMAT)
-    weekday: str = WEEKDAYS[today.weekday()]
-    time: datetime.time = now.time()
 
     def today_in_service_interval(row: gtfs.CSV_Row) -> bool:
         return (
             datetime.datetime.strptime(row['start_date'], DATE_FORMAT).date()
-            <= today <=
+            <= date <=
             datetime.datetime.strptime(row['end_date'], DATE_FORMAT).date()
         )
 
@@ -93,7 +91,7 @@ def trips(
 
     with zipfile.ZipFile(filename, 'r') as feed:
         calendar: gtfs.FilteredCSV = gtfs.FilteredCSV(
-            feed, 'calendar.txt', {weekday: '1'}
+            feed, 'calendar.txt', {WEEKDAYS[date.weekday()]: '1'}
         )
         service_ids: typing.Set[str] = set(map(
             operator.itemgetter('service_id'),
@@ -101,7 +99,8 @@ def trips(
         ))
         if 'calendar_dates.txt' in feed.namelist():
             calendar_dates: gtfs.FilteredCSV = gtfs.FilteredCSV(
-                feed, 'calendar_dates.txt', {'date': date}
+                feed, 'calendar_dates.txt',
+                {'date': date.strftime(DATE_FORMAT)}
             )
             exceptions: typing.Dict[str, typing.List[gtfs.CSV_Row]] = (
                 gtfs.binned_by_field(calendar_dates.rows, 'exception_type')
@@ -144,6 +143,31 @@ def main() -> None:
         help='number of trains to display',
     )
     parser.add_argument(
+        '--date',
+        type=lambda date: datetime.datetime.strptime(
+            date, DATE_FORMAT_DISPLAY
+        ).date(),
+        default=None,
+        help=(
+            'date on which to look for trains ({fmt})'
+        ).format(fmt=DATE_FORMAT_DISPLAY.replace('%', '%%')),
+    )
+    parser.add_argument(
+        '--tomorrow',
+        action='store_true',
+        help='look for trains running tomorrow',
+    )
+    parser.add_argument(
+        '--after',
+        type=lambda time: datetime.datetime.strptime(
+            time, TIME_FORMAT_DISPLAY
+        ).time(),
+        default=None,
+        help=(
+            'time after which (inclusive) to start looking for trains ({fmt})'
+        ).format(fmt=TIME_FORMAT_DISPLAY.replace('%', '%%')),
+    )
+    parser.add_argument(
         'feed',
         nargs='?',
         default=None,
@@ -154,6 +178,28 @@ def main() -> None:
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING
     )
+
+    if args.after is None:
+        args.after = (
+            datetime.time() if args.date is not None or args.tomorrow
+            else datetime.datetime.now().time()
+        )
+    today: datetime.date = datetime.date.today()
+    tomorrow: datetime.date = today + datetime.timedelta(days=1)
+    if args.date is None:
+        args.date = tomorrow if args.tomorrow else today
+    else:
+        args.date = datetime.date(
+            today.year if
+                (args.date.month, args.date.day) >= (today.month, today.day)
+            else today.year + 1,
+            args.date.month,
+            args.date.day
+        )
+        if args.tomorrow and args.date != tomorrow:
+            raise ValueError('Date options conflict.')
+    logger.debug(('Will be looking for trains starting at {time:%H:%M} on '
+                  '{date:%Y-%m-%d}.').format(time=args.after, date=args.date))
 
     trimmed_feed: str
     config_file: str
@@ -209,7 +255,7 @@ def main() -> None:
     }[config['route_type_id']]
     trip_found: bool = False
     for departure_time, arrival_time in itertools.islice(
-            trips(trimmed_feed, config), args.n
+            trips(trimmed_feed, config, args.date, args.after), args.n
     ):
         print(
             'There is a {vhn} leaving {dna} at {dtm} that will arrive at '
